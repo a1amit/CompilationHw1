@@ -1,4 +1,12 @@
-(* hw1.ml *)
+(* hw1.ml
+ * Handling infix expressions with percents:
+ *
+ *   x + y %
+ *   x - y %
+ *   x * y %
+ *
+ * Programmer: Mayer Goldberg, 2024
+ *)
 
 #use "pc.ml";;
 
