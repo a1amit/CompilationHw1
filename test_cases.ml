@@ -75,3 +75,8 @@ run_test 24 "(/ x) * (- y)";;
 (*part 2.1 test cases*)
 run_test 25 "2 * 3 + 4%";;
 run_test 26 "2 / 3 + 4%";;
+run_test 27 "2 / 3 + (2 + 5%)%";;
+run_test 28 "2 + 50%";;
+run_test 29 "5 * 2 + 50%";;
+run_test 30 "5 * 2 + (50)%";;
+run_test 31 "5 * 2 + (50 - 25%)%";;
