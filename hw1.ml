@@ -1,13 +1,3 @@
-(* hw1.ml
- * Handling infix expressions with percents:
- *
- *   x + y %
- *   x - y %
- *   x * y %
- *
- * Programmer: Mayer Goldberg, 2024
- *)
-
 #use "pc.ml";;
 
 type binop = Add | Sub | Mul | Div | Mod | Pow | AddPer | SubPer | PerOf;;
@@ -16,12 +6,13 @@ type expr =
   | Num of int
   | Var of string
   | BinOp of binop * expr * expr
+  | PerExpr of expr        (* Expression followed by '%' *)
   | Deref of expr * expr
   | Call of expr * expr list;;
 
 module type INFIX_PARSER = sig
   val nt_expr : expr PC.parser
-end;; (* module type INFIX_PARSER *)
+end;;
 
 module InfixParser : INFIX_PARSER = struct
   open PC;;
@@ -51,9 +42,16 @@ module InfixParser : INFIX_PARSER = struct
             | Some _ -> -n
             | None -> n);;
 
-  let nt_number =
-    pack (caten nt_skip_whitespace nt_integer)
-         (fun (_, n) -> Num n);;
+  let nt_number s i =
+    let nt =
+      pack
+        (caten nt_skip_whitespace
+          (caten nt_integer (maybe (make_char_ws '%'))))
+        (fun (_, (n, perc_opt)) ->
+           match perc_opt with
+           | Some _ -> PerExpr (Num n)
+           | None -> Num n)
+    in nt s i
 
   (* Parser for variables *)
   let nt_var_start = disj (range 'a' 'z') (range 'A' 'Z');;
@@ -66,11 +64,8 @@ module InfixParser : INFIX_PARSER = struct
     pack (caten nt_skip_whitespace nt_var_name)
          (fun (_, cs) -> Var (string_of_list cs));;
 
-  (* Recursive parser for expressions *)
-  let rec nt_expr s i = nt_percent_expr s i
-
   (* Parser for parenthesized expressions *)
-  and nt_paren_expr s i =
+  let rec nt_paren_expr s i =
     let nt =
       pack (caten (make_char_ws '(') (caten nt_expr (make_char_ws ')')))
            (fun (_, (e, _)) -> e)
@@ -107,27 +102,37 @@ module InfixParser : INFIX_PARSER = struct
     let nt = pack nt_indexing (fun idx -> fun e -> Deref (e, idx)) in
     nt s i
 
-  (* Parser for postfix operators (function calls and indexing) *)
+  (* Parser for postfix operators *)
   and nt_postfix_op s i =
     (disj nt_call_op nt_index_op) s i
 
   (* Parser for expressions with postfix operators *)
   and nt_postfix s i =
-    let nt =
-      pack (caten nt_atomic (star nt_postfix_op))
-           (fun (e, ops) ->
-              List.fold_left (fun acc op -> op acc) e ops)
-    in nt s i
+    let res_atomic = nt_atomic s i in
+    let rec parse_postfix e index_from index_to =
+      try
+        (* Handle postfix '%' operator *)
+        let res_percent = (make_char_ws '%') s index_to in
+        parse_postfix (PerExpr e) index_from res_percent.index_to
+      with X_no_match ->
+        try
+          (* Handle other postfix operators *)
+          let res_op = nt_postfix_op s index_to in
+          let e1 = res_op.found e in
+          parse_postfix e1 index_from res_op.index_to
+        with X_no_match ->
+          { index_from = index_from; index_to = index_to; found = e }
+    in
+    parse_postfix res_atomic.found res_atomic.index_from res_atomic.index_to
 
   (* Parser for unary operators *)
   and nt_unary_op s i =
-    let nt =
-      maybe
-        (disj (pack (make_char_ws '-') (fun _ -> '-'))
-              (pack (make_char_ws '/') (fun _ -> '/')))
-    in nt s i
+    maybe
+      (disj
+         (pack (make_char_ws '-') (fun _ -> '-'))
+         (pack (make_char_ws '/') (fun _ -> '/')))
+      s i
 
-  (* Parser for expressions with unary operators *)
   and nt_unary s i =
     let nt =
       pack (caten nt_unary_op nt_postfix)
@@ -136,73 +141,100 @@ module InfixParser : INFIX_PARSER = struct
               | Some '-' ->
                   (match e with
                    | Num n -> Num (-n)
+                   | PerExpr (Num n) -> PerExpr (Num (-n))
                    | _ -> BinOp (Sub, Num 0, e))
               | Some '/' -> BinOp (Div, Num 1, e)
               | None -> e
-              | Some _ -> raise X_no_match)
+              | Some _ -> e)
     in nt s i
 
   (* Parser for exponentiation (right-associative) *)
   and nt_power s i =
-    let nt =
-      pack (caten nt_unary (maybe (pack (caten (make_char_ws '^') nt_power) (fun (_, e) -> e))))
-           (fun (e1, e2_opt) ->
-              match e2_opt with
-              | Some e2 -> BinOp (Pow, e1, e2)
-              | None -> e1)
-    in nt s i
+    chainr1 nt_unary nt_pow_op s i
 
-  (* Parser for multiplicative operators *)
+  and nt_pow_op s i =
+    let nt = pack (make_char_ws '^') (fun _ -> fun e1 e2 -> BinOp (Pow, e1, e2)) in
+    nt s i
+
+  (* Percentage addition and subtraction operators *)
+  and nt_perc_add_sub_op s i =
+    disj nt_add_per_op nt_sub_per_op s i
+
+  and nt_add_per_op s i =
+    pack (make_char_ws '+')
+      (fun _ -> fun e1 e2 ->
+         match e2 with
+         | PerExpr e -> BinOp (AddPer, e1, e)
+         | _ -> raise X_no_match) s i
+
+  and nt_sub_per_op s i =
+    pack (make_char_ws '-')
+      (fun _ -> fun e1 e2 ->
+         match e2 with
+         | PerExpr e -> BinOp (SubPer, e1, e)
+         | _ -> raise X_no_match) s i
+
+  (* Multiplicative operators *)
   and nt_mul_op s i =
-    let nt =
-      disj_list
-        [ pack (make_word_ws "mod") (fun _ -> fun e1 e2 -> BinOp (Mod, e1, e2));
-          pack (make_char_ws '*') (fun _ -> fun e1 e2 -> BinOp (Mul, e1, e2));
-          pack (make_char_ws '/') (fun _ -> fun e1 e2 -> BinOp (Div, e1, e2)) ]
-    in nt s i
+    pack (make_char_ws '*')
+      (fun _ -> fun e1 e2 ->
+         match e2 with
+         | PerExpr e -> BinOp (PerOf, e1, e)
+         | _ -> BinOp (Mul, e1, e2)) s i
 
-  (* Parser for terms (multiplication, division, modulus) *)
-  and nt_term s i =
-    chainl1 nt_power nt_mul_op s i
+  and nt_div_op s i =
+    pack (make_char_ws '/')
+      (fun _ -> fun e1 e2 -> BinOp (Div, e1, e2)) s i
 
-  (* Parser for additive operators *)
+  and nt_mul_div_op s i =
+    disj nt_mul_op nt_div_op s i
+
+  (* Additive operators *)
   and nt_add_op s i =
-    let nt =
-      disj_list
-        [ pack (make_char_ws '+') (fun _ -> fun e1 e2 -> BinOp (Add, e1, e2));
-          pack (make_char_ws '-') (fun _ -> fun e1 e2 -> BinOp (Sub, e1, e2)) ]
-    in nt s i
+    pack (make_char_ws '+')
+      (fun _ -> fun e1 e2 -> BinOp (Add, e1, e2)) s i
 
-  (* Parser for arithmetic expressions (addition, subtraction) *)
+  and nt_sub_op s i =
+    pack (make_char_ws '-')
+      (fun _ -> fun e1 e2 -> BinOp (Sub, e1, e2)) s i
+
+  and nt_add_sub_op s i =
+    disj nt_add_op nt_sub_op s i
+
+  (* Parsing functions *)
+  and nt_expr s i = nt_arith_expr s i
+
   and nt_arith_expr s i =
-    chainl1 nt_term nt_add_op s i
+    chainl1 nt_term nt_add_sub_op s i
 
-  (* Parser for percentage operators *)
-  and nt_per_op s i =
-    let nt =
-      disj_list
-        [ pack (make_word_ws "+%") (fun _ -> fun e1 e2 -> BinOp (AddPer, e1, e2));
-          pack (make_word_ws "-%") (fun _ -> fun e1 e2 -> BinOp (SubPer, e1, e2));
-          pack (make_word_ws "*%") (fun _ -> fun e1 e2 -> BinOp (PerOf, e1, e2)) ]
-    in nt s i
+  and nt_term s i =
+    chainl1 nt_factor nt_mul_div_op s i
 
-  (* Parser for expressions with percentage operators *)
-  and nt_percent_expr s i =
-    chainl1 nt_arith_expr nt_per_op s i
+  and nt_factor s i =
+    chainl1 nt_power nt_perc_add_sub_op s i
 
-  (* Helper function for left-associative parsing *)
+  (* Helper functions *)
   and chainl1 nt op s i =
-    let { index_from = i_start; index_to = i1; found = e1 } = nt s i in
-    let rec rest e i_last =
+    let rec parse_rest res_e =
       try
-        let { index_from = _; index_to = op_to; found = f } = op s i_last in
-        let { index_from = _; index_to = nt_to; found = e2 } = nt s op_to in
-        let e' = f e e2 in
-        rest e' nt_to
-      with X_no_match -> { index_from = i_start; index_to = i_last; found = e }
+        let res_op = op s res_e.index_to in
+        let res_e2 = nt s res_op.index_to in
+        let new_e = res_op.found res_e.found res_e2.found in
+        parse_rest { index_from = res_e.index_from; index_to = res_e2.index_to; found = new_e }
+      with X_no_match -> res_e
     in
-    rest e1 i1
+    let res_e = nt s i in
+    parse_rest res_e
+
+  and chainr1 nt op s i =
+    let res_e1 = nt s i in
+    try
+      let res_op = op s res_e1.index_to in
+      let res_e2 = chainr1 nt op s res_op.index_to in
+      let new_e = res_op.found res_e1.found res_e2.found in
+      { index_from = res_e1.index_from; index_to = res_e2.index_to; found = new_e }
+    with X_no_match -> res_e1
   ;;
-end;; (* module InfixParser *)
+end;;
 
 open InfixParser;;
