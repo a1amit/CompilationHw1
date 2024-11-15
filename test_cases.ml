@@ -45,6 +45,8 @@ let run_test n input =
 ;;
 
 (* Run your test cases *)
+
+(*part 2 test cases:*)
 run_test 1 "1";;
 run_test 2 "x";;
 run_test 3 "x + y";;
@@ -69,5 +71,7 @@ run_test 21 "1 + -1";;
 run_test 22 "1 + -1 - -3";;
 run_test 23 "1 + -1 - -3 + (- x)";;
 run_test 24 "(/ x) * (- y)";;
+
+(*part 2.1 test cases*)
 run_test 25 "2 * 3 + 4%";;
 run_test 26 "2 / 3 + 4%";;
