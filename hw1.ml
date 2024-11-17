@@ -1,13 +1,3 @@
-(* hw1.ml
- * Handling infix expressions with percents:
- *
- *   x + y %
- *   x - y %
- *   x * y %
- *
- * Programmer: Mayer Goldberg, 2024
- *)
-
 #use "pc.ml";;
 open PC;;
 
@@ -73,7 +63,9 @@ module InfixParser : INFIX_PARSER = struct
 
   let nt_variable =
     pack (caten nt_skip_whitespace nt_var_name)
-         (fun (_, cs) -> Var (string_of_list cs));;
+         (fun (_, cs) ->
+            let var_name = string_of_list cs in
+            if var_name = "mod" then raise X_no_match else Var var_name);;
 
   (* Parser for parenthesized expressions *)
   let rec nt_paren_expr s i =
@@ -197,8 +189,14 @@ module InfixParser : INFIX_PARSER = struct
     pack (make_char_ws '/')
       (fun _ -> fun e1 e2 -> BinOp (Div, e1, e2)) s i
 
-  and nt_mul_div_op s i =
-    disj nt_mul_op nt_div_op s i
+  (* Modulo operator *)
+  and nt_mod_op s i =
+    pack (make_word_ws "mod")
+      (fun _ -> fun e1 e2 -> BinOp (Mod, e1, e2)) s i
+
+  (* Updated multiplicative operators *)
+  and nt_mul_div_mod_op s i =
+    disj_list [nt_mul_op; nt_div_op; nt_mod_op] s i
 
   (* Additive operators *)
   and nt_add_op s i =
@@ -219,7 +217,7 @@ module InfixParser : INFIX_PARSER = struct
     chainl1 nt_term nt_add_sub_op s i
 
   and nt_term s i =
-    chainl1 nt_factor nt_mul_div_op s i
+    chainl1 nt_factor nt_mul_div_mod_op s i
 
   and nt_factor s i =
     chainl1 nt_power nt_perc_add_sub_op s i

@@ -87,3 +87,10 @@ run_test 35 "7 / (6 + 5 * 5%)";;
 run_test 36 "10 / 5 - 20%";;
 run_test 37 "10 / 5 - 20% + 100%";;
 run_test 38 "10 / 5 - 20% + 100% - 6%";;
+run_test 39 "a mod b";; (*utop[15]*)
+run_test 40 "m mod b";; (*utop[16]*)
+run_test 41 "mod mod b";; (*utop[17]*)
+run_test 42 "mod + b";; (*utop[18]*)
+run_test 43 "modest";; (*utop[19]*)
+run_test 44 "mode";;  (*utop[20]*)
+run_test 45 "mod";; (*utop[21]*)
