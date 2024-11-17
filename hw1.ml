@@ -7,9 +7,8 @@
  *
  * Programmer: Mayer Goldberg, 2024
  *)
- 
+
 #use "pc.ml";;
-open PC;;
 
 type binop = Add | Sub | Mul | Div | Mod | Pow | AddPer | SubPer | PerOf;;
 
